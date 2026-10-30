@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Hunter &amp; Herd</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script>(w=>{console.warn=function(){if(String(arguments[0]).includes('cdn.tailwindcss.com should not be used'))return;w.apply(console,arguments)}})(console.warn)</script>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>body{margin:0;overflow:hidden;background:#0b1a10;font-family:system-ui,sans-serif}canvas{display:block}.bar{height:10px;border-radius:5px;transition:width .1s}</style>
+</head><body>
+<div id="lobby" class="fixed inset-0 z-20 flex items-center justify-center bg-black/75 text-white p-4">
+ <div class="w-full max-w-md bg-emerald-950/90 border border-emerald-700 rounded-2xl p-6 space-y-4">
+  <h1 class="text-3xl font-bold text-center">🦌 Hunter &amp; Herd</h1>
+  <p class="text-sm text-emerald-200 text-center">1 Hunter vs up to 3 Deer · Hunter is picked at random · peer-to-peer WebRTC</p>
+  <div id="menu" class="space-y-3">
+   <input id="tagIn" maxlength="12" placeholder="Your gamertag" class="w-full px-3 py-2 rounded-lg bg-black/40 border border-emerald-700">
+   <button id="hostBtn" class="w-full py-3 rounded-lg bg-red-700 hover:bg-red-600 font-semibold">Host Game (roles are random)</button>
+   <div class="flex gap-2"><button id="soloBtn" class="flex-1 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm">Practice: Hunter</button><button id="soloDeerBtn" class="flex-1 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm">Practice: Deer (vs bot Hunter)</button></div>
+   <div class="flex gap-2"><input id="codeIn" maxlength="5" placeholder="ROOM CODE" class="flex-1 px-3 py-2 rounded-lg bg-black/40 border border-emerald-700 uppercase"><button id="joinBtn" class="px-4 rounded-lg bg-emerald-700 hover:bg-emerald-600 font-semibold">Join as Deer</button></div>
+  </div>
+  <div id="roomInfo" class="hidden space-y-2">
+   <div class="text-center">Room code: <b id="roomCode" class="text-2xl tracking-widest text-amber-300"></b></div>
+   <div class="flex gap-2"><input id="roomLink" readonly class="flex-1 px-2 py-1 text-xs rounded bg-black/40 border border-emerald-700"><button id="copyBtn" class="px-3 rounded bg-emerald-700 text-sm">Copy</button></div>
+  </div>
+  <ul id="slots" class="space-y-1 text-sm"></ul>
+  <button id="startBtn" class="hidden w-full py-3 rounded-lg bg-amber-600 hover:bg-amber-500 font-semibold">Start Match</button>
+  <p id="status" class="text-center text-sm text-amber-300 min-h-[1.25rem]"></p>
+  <div class="flex items-center gap-2 text-sm"><span>Graphics:</span><select id="gfx" class="flex-1 px-2 py-1 rounded bg-black/40 border border-emerald-700"><option value="low">Low (fastest)</option><option value="med">Medium</option><option value="high">High</option></select></div>
+  <p class="text-xs text-emerald-300/70">WASD move · Mouse look · Hunter: click to shoot · Deer: Shift to sprint, E to eat mushrooms 🍄, blend with the herd. Press G in-game to change graphics.</p>
+ </div>
+</div>
+
+<div id="hud" class="hidden fixed inset-0 pointer-events-none text-white z-10">
+ <div id="vig" class="absolute inset-0" style="background:radial-gradient(transparent 35%,rgba(150,0,0,.95));opacity:0"></div>
+ <div id="time" class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded bg-black/50 font-mono"></div>
+ <div id="toast" class="absolute top-14 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-black/60 text-center transition-opacity" style="opacity:0"></div>
+ <div id="hHud" class="hidden">
+  <div class="absolute inset-0 flex items-center justify-center"><div class="absolute w-5 h-0.5 bg-white/80"></div><div class="absolute w-0.5 h-5 bg-white/80"></div></div>
+  <div class="absolute top-4 right-4 w-24 text-center"><div id="ring" class="w-20 h-20 mx-auto rounded-full border-8" style="border-color:hsl(120,90%,55%);opacity:.25"></div><div id="ping" class="text-xs font-bold text-red-400 mt-1" style="opacity:0">⚠ SPRINT DETECTED</div></div>
+  <div class="absolute bottom-4 left-4 w-64 space-y-2 bg-black/40 p-3 rounded"><div>Ammo: <b id="ammo" class="text-xl"></b></div><div id="inv" class="text-sm"></div><div class="text-xs">Sanity</div><div class="bg-gray-700 rounded"><div id="sanBar" class="bar bg-purple-500"></div></div></div>
+ </div>
+ <div id="dHud" class="hidden">
+  <div class="absolute bottom-4 left-4 w-64 space-y-2 bg-black/40 p-3 rounded">
+   <div class="text-xs">Hunger (find 🍄)</div><div class="bg-gray-700 rounded"><div id="hunBar" class="bar bg-orange-500"></div></div>
+   <div class="text-xs">Sprint (Shift / Space / hold click)</div><div class="bg-gray-700 rounded"><div id="enBar" class="bar bg-cyan-400"></div></div>
+  </div>
+  <div id="eatTip" class="hidden absolute bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-black/60 font-bold">Press <b class="text-amber-300">E</b> to eat 🍄</div>
+  <button id="sprintBtn" class="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full bg-cyan-700 font-bold select-none">🦌 SPRINT</button>
+  <div id="stealth" class="absolute bottom-4 right-4 px-3 py-2 rounded bg-black/50 text-sm"></div>
+  <div class="absolute top-3 left-4 w-48 bg-black/40 p-2 rounded text-xs">Hunter sanity<div class="bg-gray-700 rounded"><div id="hsanBar" class="bar bg-purple-500"></div></div></div>
+  <div id="dead" class="hidden absolute top-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded bg-red-900/80">You were eliminated — spectating</div>
+ </div>
+</div>
+<div id="lockMsg" class="fixed inset-0 z-20 items-center justify-center bg-black/50 text-white text-2xl cursor-pointer" style="display:none"><div class="text-center">Click to capture mouse &amp; play<div class="text-sm mt-2 opacity-80">Press G to change graphics quality</div></div></div>
+<div id="end" class="fixed inset-0 z-30 items-center justify-center bg-black/80 text-white flex-col gap-4" style="display:none"><div id="endMsg" class="text-3xl font-bold text-center px-4"></div><button onclick="location.reload()" class="px-6 py-3 rounded-lg bg-emerald-700 hover:bg-emerald-600">Back to Lobby</button></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const G={phase:'lobby',host:false,me:0,peer:null,conn:null,conns:{},slots:[true,false,false,false],seed:0,P:[],N:[],M:[],trees:[],treeMeshes:[],sanity:100,ammo:8,time:300,keys:{},yaw:0,pitch:0,locked:false,sendT:0,stT:0,cd:0,en:100,lock:false,pingT:0,hadDeer:false,dn:1,gs:[true,false,false,false],tags:[],names:[],map:null,bot:false,inv:{f:0,t:0},IT:[],iid:0};
+const clamp=v=>Math.max(-92,Math.min(92,v));
+let AC,tt;
+function snd(f,d,type){try{AC=AC||new AudioContext();const t=AC.currentTime,o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.setValueAtTime(f,t);o.frequency.exponentialRampToValueAtTime(Math.max(30,f/3),t+d);g.gain.setValueAtTime(.15,t);g.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(g);g.connect(AC.destination);o.start();o.stop(t+d)}catch(e){}}
+function toast(m){const e=$('toast');e.textContent=m;e.style.opacity=1;clearTimeout(tt);tt=setTimeout(()=>e.style.opacity=0,3500)}
+function setStatus(m){$('status').textContent=m}
+function bc(m){for(const k in G.conns)if(G.conns[k].open)G.conns[k].send(m)}
+function msg(m){toast(m);bc({t:'toast',m})}
+
+/* ---------- LOBBY / NETWORK ---------- */
+const esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+function renderSlots(){$('slots').innerHTML=G.slots.map((o,i)=>`<li class="${o?'text-emerald-300':'text-gray-500'}">${o?'●':'○'} Player ${i+1}${i?'':' (Host)'} — ${o?esc(G.tags[i]||'…'):'waiting…'}${o&&i===G.me&&(G.host||G.me>0)?' <b>(you)</b>':''}</li>`).join('')}
+renderSlots();
+if(location.hash.length>1)$('codeIn').value=location.hash.slice(1).toUpperCase();
+$('copyBtn').onclick=()=>{$('roomLink').select();try{navigator.clipboard.writeText($('roomLink').value)}catch(e){document.execCommand('copy')}};
+$('hostBtn').onclick=()=>{
+ const c=Math.random().toString(36).slice(2,7).toUpperCase();G.host=true;G.me=0;G.tags[0]=tag();setStatus('Connecting to signaling server…');
+ G.peer=new Peer('deerhunt-'+c);
+ G.peer.on('open',()=>{$('roomLink').value=location.href.split('#')[0]+'#'+c;$('roomCode').textContent=c;$('roomInfo').classList.remove('hidden');$('startBtn').classList.remove('hidden');$('menu').classList.add('hidden');setStatus('Share the link or code with up to 3 friends.');renderSlots()});
+ G.peer.on('connection',onGuest);
+ G.peer.on('error',e=>setStatus('Network error: '+e.type));
+};
+const tag=()=>($('tagIn').value.trim()||'Deer'+(100+Math.random()*900|0)).slice(0,12);
+function practice(asDeer){G.host=true;G.bot=asDeer;G.me=asDeer?1:0;G.gs=[true,asDeer,false,false];G.names=['Bot Hunter',tag()];G.seed=(Math.random()*1e9)|0;startGame();renderer.domElement.requestPointerLock()}
+$('soloBtn').onclick=()=>practice(false);$('soloDeerBtn').onclick=()=>practice(true);
+function onGuest(conn){
+ conn.on('open',()=>{
+  const i=G.slots.indexOf(false,1);
+  if(i<0||G.phase!=='lobby'){conn.send({t:'full'});setTimeout(()=>conn.close(),400);return}
+  G.slots[i]=true;G.conns[i]=conn;G.tags[i]='Player'+(i+1);conn.send({t:'you',i});bcLobby();
+  conn.on('data',d=>{const gi=G.map?G.map[i]:i,p=G.P[gi];if(d.t==='name'){G.tags[i]=String(d.n).slice(0,12);bcLobby()}if(d.t==='shot'&&G.map&&gi===0&&G.cd<=0&&Array.isArray(d.o)&&Array.isArray(d.d))doShot(new THREE.Vector3(+d.o[0],+d.o[1],+d.o[2]),new THREE.Vector3(+d.d[0],+d.d[1],+d.d[2]));if(d.t==='eat'&&G.map)eat(gi);if(d.t==='item'&&G.map&&gi===0&&(d.k==='f'||d.k==='t'))useItem(d.k);if(d.t==='in'&&p&&p.al){p.gx=d.x;p.gz=d.z;p.gry=d.ry;p.sp=!!d.sp}});
+  conn.on('close',()=>{const gi=G.map?G.map[i]:i;G.slots[i]=false;delete G.conns[i];if(G.P[gi]&&G.P[gi].al&&G.phase!=='over'){G.P[gi].al=false;if(!gi)finish('The Hunter left the game. The Deer win!');else msg('A deer left the forest')}bcLobby()});
+ });
+}
+function bcLobby(){renderSlots();bc({t:'lobby',s:G.slots,tg:G.tags})}
+$('joinBtn').onclick=()=>{
+ const c=$('codeIn').value.toUpperCase().trim();if(!c)return setStatus('Enter a room code');
+ setStatus('Connecting…');G.peer=new Peer();
+ G.peer.on('open',()=>{
+  const conn=G.conn=G.peer.connect('deerhunt-'+c,{reliable:true});
+  conn.on('open',()=>{conn.send({t:'name',n:tag()});setStatus('Connected! Waiting for the host to start…');$('menu').classList.add('hidden')});
+  conn.on('data',peerRecv);
+  conn.on('close',()=>{if(G.phase!=='over'){alert('Host disconnected');location.reload()}});
+ });
+ G.peer.on('error',e=>setStatus('Could not join: '+e.type));
+};
+function peerRecv(d){
+ switch(d.t){
+  case 'you':G.me=d.i;renderSlots();break;
+  case 'lobby':G.slots=d.s;G.tags=d.tg||[];renderSlots();break;
+  case 'full':setStatus('Room is full or already started.');break;
+  case 'start':G.seed=d.seed;G.me=d.me;G.names=d.names;G.gs=[true,d.n>0,d.n>1,d.n>2];startGame();break;
+  case 'st':if(G.P.length)applyState(d);break;
+  case 'toast':toast(d.m);break;
+  case 'ch':chomp(d.x,d.z);break;
+  case 'it':addItem(d.id,d.k,d.x,d.z);break;
+  case 'rm':G.IT.forEach(i=>{if(i.id===d.id)i.t=0});break;
+  case 'tr':tracer(new THREE.Vector3(...d.a),new THREE.Vector3(...d.b));break;
+  case 'over':endGame(d.m);break;
+ }
+}
+$('startBtn').onclick=()=>{
+ const occ=[0,1,2,3].filter(i=>G.slots[i]),hs=occ[Math.random()*occ.length|0];
+ G.map={};G.map[hs]=0;let g=1;occ.forEach(i=>{if(i!==hs)G.map[i]=g++});
+ G.names=[];occ.forEach(i=>G.names[G.map[i]]=G.tags[i]||'Player'+(i+1));
+ G.seed=(Math.random()*1e9)|0;const n=occ.length-1;G.gs=[true,n>0,n>1,n>2];
+ for(const k in G.conns)G.conns[k].send({t:'start',seed:G.seed,n,me:G.map[k],names:G.names});
+ G.me=G.map[0];startGame();renderer.domElement.requestPointerLock()};
+
+/* ---------- THREE SETUP ---------- */
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;renderer.setSize(innerWidth,innerHeight);document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x8a6e5c);scene.fog=new THREE.Fog(0x8a6e5c,25,120);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,200);camera.rotation.order='YXZ';scene.add(camera);
+scene.add(new THREE.HemisphereLight(0xb7c8ff,0x2a3a22,.8));
+const sun=new THREE.DirectionalLight(0xffc98a,1.15);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);const sc=sun.shadow.camera;sc.left=sc.bottom=-55;sc.right=sc.top=55;sc.near=1;sc.far=160;sun.shadow.bias=-.0004;scene.add(sun);scene.add(sun.target);
+const gc=document.createElement('canvas');gc.width=gc.height=256;const gx=gc.getContext('2d');gx.fillStyle='#2f5a2c';gx.fillRect(0,0,256,256);
+for(let i=0;i<1800;i++){gx.fillStyle=`hsla(${70+Math.random()*50},45%,${18+Math.random()*22}%,.5)`;gx.fillRect(Math.random()*256,Math.random()*256,2+Math.random()*6,2+Math.random()*6)}
+const gt=new THREE.CanvasTexture(gc);gt.wrapS=gt.wrapT=THREE.RepeatWrapping;gt.repeat.set(40,40);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshLambertMaterial({map:gt}));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+const sky=new THREE.Mesh(new THREE.SphereGeometry(180,16,12),new THREE.ShaderMaterial({side:THREE.BackSide,fog:false,depthWrite:false,vertexShader:'varying vec3 p;void main(){p=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',fragmentShader:'varying vec3 p;void main(){float h=clamp(normalize(p).y*1.6+.1,0.,1.);gl_FragColor=vec4(mix(vec3(.85,.62,.45),vec3(.06,.1,.25),h),1.);}'}));scene.add(sky);
+let GM;{const N=4000,gm=GM=new THREE.InstancedMesh(new THREE.ConeGeometry(.1,.55,4),new THREE.MeshLambertMaterial({color:0x4f8f3a}),N),dm=new THREE.Object3D();
+ for(let i=0;i<N;i++){dm.position.set((Math.random()-.5)*196,.27,(Math.random()-.5)*196);dm.rotation.y=Math.random()*6;dm.scale.set(1,.6+Math.random()*1.2,1);dm.updateMatrix();gm.setMatrixAt(i,dm.matrix)}scene.add(gm)}
+const FF=120,ffp=new Float32Array(FF*3);for(let i=0;i<FF;i++){ffp[i*3]=(Math.random()-.5)*180;ffp[i*3+1]=2;ffp[i*3+2]=(Math.random()-.5)*180}
+const ffg=new THREE.BufferGeometry();ffg.setAttribute('position',new THREE.BufferAttribute(ffp,3));
+const FFP=new THREE.Points(ffg,new THREE.PointsMaterial({color:0xffee88,size:.35,transparent:true,opacity:.9,blending:THREE.AdditiveBlending,depthWrite:false}));scene.add(FFP);
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+const L=(c,o)=>new THREE.MeshPhongMaterial(Object.assign({color:c,flatShading:true,shininess:4,specular:0x111111},o||{}));
+const MT={bark:L(0x5a3a22),leaf:L(0x1f6b2e),leaf2:L(0x2a8a3a),leaf3:L(0x56802a),belly:L(0xe8d8c0),white:L(0xffffff),rock:L(0x777777),deer:L(0x9b6a3c),wen:L(0x120808),cap:L(0xd02020,{emissive:0x902020}),stem:L(0xeeeedd),hunter:L(0xc86a1e),eye:new THREE.MeshBasicMaterial({color:0xff2020})};
+function rng(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function mkDeer(){const g=new THREE.Group(),rig=new THREE.Group();rig.position.set(-.5,.8,0);g.add(rig);
+ const box=(p,w,h,d,x,y,z,rz,top)=>{const ge=new THREE.BoxGeometry(w,h,d);if(top)ge.translate(0,-h/2,0);const b=new THREE.Mesh(ge,MT.deer);b.position.set(x,y,z);if(rz)b.rotation.z=rz;p.add(b);return b};
+ box(rig,1.5,.7,.6,.5,.3,0);box(rig,.3,.8,.3,1.3,.8,0,-.4);box(rig,.55,.32,.32,1.65,1.2,0);
+ box(rig,.08,.5,.08,1.6,1.55,.12,.3);box(rig,.08,.5,.08,1.6,1.55,-.12,-.3);
+ const pt=(m,w,h,d,x,y,z,rz)=>{const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);b.position.set(x,y,z);if(rz)b.rotation.z=rz;rig.add(b)};
+ pt(MT.belly,1.4,.18,.5,.5,.02,0);pt(MT.white,.18,.22,.14,-.3,.5,0,.5);pt(MT.deer,.12,.22,.08,1.55,1.45,.2,-.2);pt(MT.deer,.12,.22,.08,1.55,1.45,-.2,-.2);
+ g.userData.rig=rig;g.userData.fl=[box(rig,.15,.8,.15,1,0,.2,0,1),box(rig,.15,.8,.15,1,0,-.2,0,1)];
+ g.userData.rl=[box(g,.15,.8,.15,-.5,.8,.2,0,1),box(g,.15,.8,.15,-.5,.8,-.2,0,1)];return g}
+function mkHunter(){const g=new THREE.Group();
+ const b=new THREE.Mesh(new THREE.CylinderGeometry(.35,.4,1.3,8),MT.hunter);b.position.y=.65;g.add(b);
+ const h=new THREE.Mesh(new THREE.SphereGeometry(.3,8,8),L(0xe0b090));h.position.y=1.55;g.add(h);
+ const c=new THREE.Mesh(new THREE.ConeGeometry(.4,.4,8),L(0x222222));c.position.y=1.9;g.add(c);return g}
+function turnWen(e){e.wen=true;e.mesh.traverse(o=>{if(o.isMesh)o.material=MT.wen});e.mesh.scale.setScalar(1.9);
+ [.12,-.12].forEach(z=>{const y=new THREE.Mesh(new THREE.BoxGeometry(.06,.06,.06),MT.eye);y.position.set(1.9,1.28,z);e.mesh.userData.rig.add(y)})}
+function ent(mesh,x,z,npc){const e={mesh,x,z,ry:0,gx:x,gz:z,gry:0,al:true,sp:false,wen:false,hu:100,npc,pt:0,v:0,wait:0,life:0,tx:x,tz:z};mesh.userData.ref=e;mesh.traverse(o=>{if(o.isMesh)o.castShadow=true});mesh.position.set(x,0,z);scene.add(mesh);return e}
+
+function buildWorld(R){
+ const ra=(a,b)=>a+R()*(b-a);
+ for(let i=0;i<280;i++){const x=ra(-92,92),z=ra(-92,92),s=ra(.8,1.7);if(Math.hypot(x,z)<7)continue;
+  const g=new THREE.Group(),tr=new THREE.Mesh(new THREE.CylinderGeometry(.25*s,.35*s,2*s,6),MT.bark);tr.position.y=s;g.add(tr);
+  for(let j=0;j<3;j++){const c=new THREE.Mesh(new THREE.ConeGeometry((1.6-j*.4)*s,2*s,7),[MT.leaf,MT.leaf2,MT.leaf3][(j+(R()*3|0))%3]);c.position.y=(2.2+j*1.1)*s;g.add(c)}
+  g.rotation.y=R()*6;g.traverse(o=>{if(o.isMesh)o.castShadow=true});g.position.set(x,0,z);scene.add(g);G.treeMeshes.push(g);G.trees.push([x,z,.5*s])}
+ for(let i=0;i<70;i++){const x=ra(-92,92),z=ra(-92,92),s=ra(.6,1.6);
+  const r=new THREE.Mesh(new THREE.DodecahedronGeometry(s),MT.rock);r.scale.y=.7;r.position.set(x,s*.4,z);r.rotation.set(R(),R(),R());r.castShadow=true;scene.add(r);G.treeMeshes.push(r);G.trees.push([x,z,s*.9])}
+ for(let i=0;i<30;i++){const x=ra(-88,88),z=ra(-88,88),g=new THREE.Group();
+  const st=new THREE.Mesh(new THREE.CylinderGeometry(.12,.16,.5,6),MT.stem);st.position.y=.25;g.add(st);
+  const cp=new THREE.Mesh(new THREE.SphereGeometry(.4,8,6,0,Math.PI*2,0,Math.PI/2),MT.cap);cp.position.y=.5;g.add(cp);for(let k=0;k<3;k++){const sp=new THREE.Mesh(new THREE.SphereGeometry(.06,5,5),MT.white);sp.position.set(Math.cos(k*2.1)*.22,.78,Math.sin(k*2.1)*.22);g.add(sp)}
+  const bm=new THREE.Mesh(new THREE.CylinderGeometry(.12,.3,5,8,1,true),new THREE.MeshBasicMaterial({color:0xff7a5a,transparent:true,opacity:.2,blending:THREE.AdditiveBlending,depthWrite:false}));bm.position.y=2.5;g.add(bm);
+  g.position.set(x,0,z);scene.add(g);G.M.push({x,z,on:true,t:0,mesh:g})}
+ for(let i=0;i<5*Math.max(1,G.dn);i++){const n=ent(mkDeer(),ra(-88,88),ra(-88,88),true);n.ry=n.gry=R()*6;G.N.push(n)}
+}
+function coll(o){for(const t of G.trees){const dx=o.x-t[0],dz=o.z-t[1],d=Math.hypot(dx,dz),r=t[2]+.5;if(d<r&&d>.001){o.x=t[0]+dx/d*r;o.z=t[1]+dz/d*r}}o.x=clamp(o.x);o.z=clamp(o.z)}
+
+function startGame(){
+ $('lobby').classList.add('hidden');$('hud').classList.remove('hidden');
+ G.dn=G.gs.slice(1).filter(Boolean).length;buildWorld(rng(G.seed));
+ G.gs.forEach((o,i)=>{if(!o){G.P[i]=null;return}
+  const a=i*2.1,x=i?Math.cos(a)*14:0,z=i?Math.sin(a)*14:0;
+  G.P[i]=ent(i?mkDeer():mkHunter(),x,z,false)});
+ mkTags();
+ G.hadDeer=G.gs.slice(1).some(Boolean);G.phase='play';G.ammo=3*Math.max(1,G.dn);
+ if(G.me===0){$('hHud').classList.remove('hidden');
+  const gun=new THREE.Mesh(new THREE.BoxGeometry(.1,.12,.7),L(0x333333));gun.position.set(.3,-.25,-.6);camera.add(gun);
+  toast('Sanity drains — find the deer before they turn Wendigo. At night use [1] flare, [2] bear trap and your gun to survive until dawn!')}
+ else{$('dHud').classList.remove('hidden');toast('Blend in with the herd. Press E next to a mushroom to eat it. Sprint only when needed.')}
+ $('lockMsg').style.display='flex';
+}
+
+/* ---------- INPUT ---------- */
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;G.keys[e.code]=true;if(e.repeat)return;if(e.code==='KeyG')cycleGfx();
+ if(G.me===0&&G.locked&&G.phase==='wen'&&(e.code==='Digit1'||e.code==='Digit2')){const k=e.code==='Digit1'?'f':'t';if(G.host)useItem(k);else if(G.conn&&G.conn.open)G.conn.send({t:'item',k})}
+ if(e.code==='KeyE'&&G.me>0&&G.locked&&G.phase==='play'){if(G.host)eat(G.me);else if(G.conn&&G.conn.open)G.conn.send({t:'eat'})}});
+addEventListener('keyup',e=>{G.keys[e.code]=false});
+$('lockMsg').onclick=()=>renderer.domElement.requestPointerLock();
+document.addEventListener('pointerlockchange',()=>{G.locked=document.pointerLockElement===renderer.domElement;
+ $('lockMsg').style.display=(!G.locked&&(G.phase==='play'||G.phase==='wen'))?'flex':'none'});
+document.addEventListener('mousemove',e=>{if(!G.locked)return;G.yaw-=e.movementX*.0022;G.pitch-=e.movementY*.0022;const m=G.me===0?1.3:.6;G.pitch=Math.max(-m,Math.min(m,G.pitch))});
+document.addEventListener('mousedown',()=>{if(!G.locked)return;if(G.me===0)shoot();else G.btn=true});
+addEventListener('mouseup',()=>{G.btn=false});
+$('sprintBtn').addEventListener('pointerdown',()=>{G.btn=true});
+['pointerup','pointerleave','pointercancel'].forEach(v=>$('sprintBtn').addEventListener(v,()=>{G.btn=false}));
+
+/* ---------- LOCAL CONTROL ---------- */
+function ctrl(dt){
+ const me=G.P[G.me];if(!me||!me.al)return;const k=G.keys,hunter=G.me===0;
+ let f=(k.KeyW?1:0)-(k.KeyS?1:0),r=(k.KeyD?1:0)-(k.KeyA?1:0);const l=Math.hypot(f,r);
+ let sp=false,speed=hunter?5.5:2.8;
+ if(!hunter){
+  if(me.wen)speed=9;
+  else if((k.ShiftLeft||k.ShiftRight||k.Space||G.btn)&&l&&G.en>0&&!G.lock){sp=true;speed=7;G.en-=45*dt;if(G.en<=0){G.en=0;G.lock=true}}
+  else{G.en=Math.min(100,G.en+(l?12:22)*dt);if(G.lock&&G.en>=35)G.lock=false}
+ }
+ me.sp=sp;me.mv=l>0&&G.locked;
+ if(l&&G.locked&&!(me.stun>0)){f/=l;r/=l;const sy=Math.sin(G.yaw),cy=Math.cos(G.yaw);
+  const dx=(-sy*f+cy*r)*speed*dt,dz=(-cy*f-sy*r)*speed*dt;me.x+=dx;me.z+=dz;coll(me);
+  if(!hunter){let d=Math.atan2(-dz,dx)-me.ry;d=Math.atan2(Math.sin(d),Math.cos(d));me.ry+=d*Math.min(1,dt*10)}
+ }else me.sp=false;
+ if(hunter)me.ry=G.yaw;
+ me.gx=me.x;me.gz=me.z;me.gry=me.ry;
+}
+function cam(){
+ const me=G.P[G.me];if(!me)return;
+ if(G.me===0){camera.position.set(me.x,1.7,me.z);camera.rotation.set(G.pitch,G.yaw,0)}
+ else{const sy=Math.sin(G.yaw),cy=Math.cos(G.yaw);
+  camera.position.set(me.x+sy*5+cy*1.2,Math.max(.8,2.6-G.pitch*4),me.z+cy*5-sy*1.2);
+  camera.lookAt(me.x-sy*2+cy*.6,1.4,me.z-cy*2-sy*.6)}
+}
+function shoot(){
+ if(G.phase==='over'||G.cd>0||G.ammo<=0)return;
+ G.cd=.6;const o=camera.position.clone(),d=camera.getWorldDirection(new THREE.Vector3());
+ if(G.host)doShot(o,d);else{G.ammo--;G.conn.send({t:'shot',o:[o.x,o.y,o.z],d:[d.x,d.y,d.z]})}
+}
+function tracer(a,b){snd(120,.3,'sawtooth');const ln=new THREE.Line(new THREE.BufferGeometry().setFromPoints([a.clone().add(new THREE.Vector3(0,-.2,0)),b]),new THREE.LineBasicMaterial({color:0xffee88}));scene.add(ln);setTimeout(()=>{scene.remove(ln);ln.geometry.dispose()},70)}
+function doShot(o,d){
+ if(G.phase==='over'||G.ammo<=0)return;
+ G.ammo--;G.cd=.6;
+ const rc=new THREE.Raycaster(o,d.clone().normalize(),0,80);
+ const tg=G.P.concat(G.N).filter(e=>e&&e.al&&e!==G.P[0]).map(e=>e.mesh);
+ const hits=rc.intersectObjects(tg.concat(G.treeMeshes),true);
+ const end=hits.length?hits[0].point:o.clone().add(d.clone().normalize().multiplyScalar(60));tracer(o,end);bc({t:'tr',a:[o.x,o.y,o.z],b:[end.x,end.y,end.z]});
+
+
+ if(hits.length){let o=hits[0].object;while(o&&!o.userData.ref)o=o.parent;const r=o&&o.userData.ref;
+  if(r){r.al=false;
+   if(r.npc){G.sanity=Math.max(0,G.sanity-34);msg('An innocent deer was shot! Hunter sanity -34')}
+   else msg('A deer player has fallen!')}}
+}
+
+/* ---------- HOST AUTHORITY ---------- */
+function wendigo(){G.phase='wen';G.time=90;G.inv={f:3,t:3};G.ammo+=5;G.P.forEach((p,i)=>{if(i&&p&&p.al){turnWen(p);p.hu=100}});msg('NIGHT FALLS — the deer become WENDIGOS! Hunter: survive until dawn! [1] flare, [2] trap')}
+function finish(m){if(G.phase==='over')return;bc({t:'over',m});endGame(m)}
+function endGame(m){G.phase='over';document.exitPointerLock();$('lockMsg').style.display='none';$('endMsg').textContent=m;$('end').style.display='flex'}
+function botTick(dt){
+ const h=G.P[0];if(!h)return;G.bs=(G.bs||0)-dt;G.bn=(G.bn===undefined?15:G.bn)-dt;G.bt=(G.bt||0)-dt;
+ let tgt=null,td=1e9;
+ G.P.forEach((p,i)=>{if(!i||!p||!p.al)return;const d=Math.hypot(p.gx-h.gx,p.gz-h.gz);if((p.sp||p.wen)&&d<40&&d<td){tgt=p;td=d}});
+ let tx,tz,sp=3.2;
+ if(G.phase==='wen'&&tgt){tx=2*h.gx-tgt.gx;tz=2*h.gz-tgt.gz;sp=5.5}
+ else if(tgt){tx=tgt.gx;tz=tgt.gz;sp=5.2}
+ else{if(!G.bw||G.bt<=0||Math.hypot(G.bw[0]-h.gx,G.bw[1]-h.gz)<3){G.bw=[clamp((Math.random()-.5)*180),clamp((Math.random()-.5)*180)];G.bt=12}tx=G.bw[0];tz=G.bw[1]}
+ const dx=tx-h.gx,dz=tz-h.gz,d=Math.hypot(dx,dz)||1;
+ if(!tgt||d>12||G.phase==='wen'){const o={x:h.gx+dx/d*sp*dt,z:h.gz+dz/d*sp*dt};coll(o);h.gx=o.x;h.gz=o.z}
+ h.gry=Math.atan2(-dz,dx);
+ if(G.phase==='wen'&&tgt&&td<9&&(G.bf=(G.bf||0)-dt)<=0&&G.inv.f>0){G.bf=4;useItem('f')}
+ const aim=(x,z)=>{const ex=x-h.gx,ez=z-h.gz,ed=Math.hypot(ex,ez)||1;doShot(new THREE.Vector3(h.gx,1.7,h.gz),new THREE.Vector3(ex+(Math.random()-.5)*ed*.1,-.5,ez+(Math.random()-.5)*ed*.1))};
+ if(tgt&&td<26&&G.bs<=0&&G.ammo>0){G.bs=2.2;aim(tgt.gx,tgt.gz)}
+ else if(!tgt&&G.bn<=0&&G.ammo>0&&G.phase==='play'){G.bn=18;const n=G.N.filter(n=>n.al&&Math.hypot(n.gx-h.gx,n.gz-h.gz)<14)[0];if(n&&Math.random()<.4)aim(n.gx,n.gz)}
+}
+function hostTick(dt){
+ if(G.bot)botTick(dt);
+ const hp=G.P[0];
+ G.N.forEach(n=>{if(!n.al)return;
+  if(n.wait>0){n.wait-=dt;return}
+  n.life-=dt;const dx=n.tx-n.gx,dz=n.tz-n.gz,d=Math.hypot(dx,dz);
+  if(d<.6||n.life<=0){n.wait=Math.random()*4;n.life=8;n.tx=clamp(n.gx+(Math.random()-.5)*30);n.tz=clamp(n.gz+(Math.random()-.5)*30);return}
+  const o={x:n.gx+dx/d*2.6*dt,z:n.gz+dz/d*2.6*dt};coll(o);n.gx=o.x;n.gz=o.z;n.gry=Math.atan2(-dz,dx)});
+ const wen=G.phase==='wen';
+ G.P.forEach((p,i)=>{if(!i||!p||!p.al)return;
+  if(!wen){p.hu-=2*dt;if(p.hu<=0){p.al=false;msg('A deer starved to death')}}
+  
+  if(wen&&Math.hypot(p.gx-hp.gx,p.gz-hp.gz)<2.2)finish('The Wendigo caught the Hunter! The Deer win.')});
+ G.M.forEach(m=>{if(!m.on&&(m.t-=dt)<=0)m.on=true});
+ if(G.phase==='play'&&G.hadDeer)G.sanity=Math.max(0,G.sanity-(2-.3*(Math.max(1,G.dn)-1))*dt);
+ if(G.sanity<=0&&G.phase==='play')wendigo();
+ G.P.forEach(p=>{if(p&&p.stun>0)p.stun-=dt});
+ if(G.phase==='wen'){G.time-=dt;if(G.time<=0)finish('Dawn breaks — the Hunter survived the night! The Hunter wins.');
+  G.IT.forEach(it=>{G.P.forEach((p,i)=>{if(!i||!p||!p.al||!p.wen)return;const d=Math.hypot(p.gx-it.x,p.gz-it.z);
+   if(it.k==='f'&&d<8)p.stun=Math.max(p.stun||0,.5);
+   if(it.k==='t'&&d<1.8&&!it.done){it.done=1;p.stun=5;it.t=0;bc({t:'rm',id:it.id});msg('A Wendigo was caught in a trap!')}})})}
+ const alive=G.P.filter((p,i)=>i&&p&&p.al).length;
+ if(G.hadDeer&&!alive)finish('All deer have been eliminated. The Hunter wins!');
+ else if(G.phase==='play'&&G.hadDeer&&G.ammo<=0&&G.cd<=0)finish('The Hunter ran out of ammo. The Deer survive!');
+
+ if((G.stT-=dt)<=0){G.stT=.066;
+  const f=v=>+v.toFixed(2);
+  bc({t:'st',P:G.P.map(p=>p?[f(p.gx),f(p.gz),f(p.gry),p.sp?1:0,Math.round(p.hu),p.al?1:0,p.wen?1:0,p.stun>0?1:0]:0),
+   N:G.N.map(n=>[f(n.gx),f(n.gz),f(n.gry),n.al?1:0]),M:G.M.map(m=>m.on?1:0),s:G.sanity,a:G.ammo,ph:G.phase,tm:Math.round(G.time),iv:G.inv})}
+}
+function applyState(d){
+ d.P.forEach((a,i)=>{const p=G.P[i];if(!a||!p)return;
+  if(i!==G.me){p.gx=a[0];p.gz=a[1];p.gry=a[2];p.sp=!!a[3]}
+  p.hu=a[4];p.al=!!a[5];p.stun=a[7];if(a[6])p.wen=true});
+ d.N.forEach((a,i)=>{const n=G.N[i];n.gx=a[0];n.gz=a[1];n.gry=a[2];n.al=!!a[3]});
+ d.M.forEach((v,i)=>G.M[i].on=!!v);
+ G.sanity=d.s;G.ammo=d.a;G.time=d.tm;G.inv=d.iv;
+ if(d.ph==='wen'&&G.phase==='play')toast('The deer have become WENDIGOS!');
+ if(G.phase!=='over')G.phase=d.ph;
+}
+
+/* ---------- RENDER HELPERS ---------- */
+const parts=[],pg=new THREE.SphereGeometry(.18,6,6);
+function puff(x,z){const m=new THREE.Mesh(pg,new THREE.MeshBasicMaterial({color:new THREE.Color().setHSL(Math.random(),1,.6)}));
+ m.position.set(x+(Math.random()-.5)*.5,.4+Math.random()*1.2,z+(Math.random()-.5)*.5);m.userData.l=1;scene.add(m);parts.push(m);
+ if(parts.length>180){const o=parts.shift();scene.remove(o);o.material.dispose()}}
+function updParts(dt){for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.userData.l-=dt;p.scale.setScalar(Math.max(.01,p.userData.l));p.position.y+=dt*.6;
+ if(p.userData.l<=0){scene.remove(p);p.material.dispose();parts.splice(i,1)}}}
+function rend(e,dt,local){
+ if(!local){const k=Math.min(1,dt*10),ox=e.x,oz=e.z;e.x+=(e.gx-e.x)*k;e.z+=(e.gz-e.z)*k;
+  let d=e.gry-e.ry;d=Math.atan2(Math.sin(d),Math.cos(d));e.ry+=d*k;e.v=Math.hypot(e.x-ox,e.z-oz)/Math.max(dt,.001)}
+ e.mesh.position.set(e.x,0,e.z);e.mesh.rotation.y=e.ry;e.mesh.visible=e.al;
+ const u=e.mesh.userData;
+ if(u.rig){const T=performance.now()/1000,mv=local?e.mv:e.v>.5;u.tl=(u.tl||0)+((e.sp?1.15:0)-(u.tl||0))*Math.min(1,dt*8);u.rig.rotation.z=u.tl;
+  const f=e.sp?16:9,a=e.sp?.8:(mv?.4:0);
+  u.fl.forEach((l,i)=>l.rotation.z=-u.tl*.8+Math.sin(T*f+i*Math.PI)*a);
+  u.rl.forEach((l,i)=>l.rotation.z=Math.sin(T*f+(i+1)*Math.PI)*a)}
+ if(e.wen&&!e.wenDone){e.wenDone=1;turnWen(e)}
+ if(e.sp&&e.al&&(e.pt-=dt)<=0){e.pt=.05;puff(e.x,e.z)}
+}
+const fmt=s=>Math.floor(Math.max(0,s)/60)+':'+String(Math.floor(Math.max(0,s)%60)).padStart(2,'0');
+function hud(dt){
+ const me=G.P[G.me],hp=G.P[0];if(!me)return;
+ {const tm=$('time');tm.textContent=G.phase==='wen'?'🐺 NIGHT — DAWN IN '+fmt(G.time):'';tm.style.display=G.phase==='wen'?'block':'none'}
+ $('vig').style.opacity=(1-G.sanity/100)*.6;
+ if(G.me===0){
+  $('ammo').textContent='🔫 '+G.ammo;$('inv').textContent=G.phase==='wen'?'[1] Flare ×'+G.inv.f+'   [2] Trap ×'+G.inv.t:'Night items unlock when sanity hits 0';$('sanBar').style.width=G.sanity+'%';
+  let best=1e9;G.P.forEach((p,i)=>{if(i&&p&&p.al&&p.sp)best=Math.min(best,Math.hypot(p.x-hp.x,p.z-hp.z))});
+  const s=Math.max(0,1-best/45),r=$('ring');
+  r.style.opacity=.25+s*.75;r.style.borderColor=`hsl(${120-120*s},90%,55%)`;r.style.transform=`scale(${1+s*.6})`;
+  $('ping').style.opacity=s>.02?1:0;
+  if(s>.02&&(G.pingT-=dt)<=0){G.pingT=.9-s*.7;snd(500+s*700,.08,'square')}
+ }else{
+  $('hunBar').style.width=me.hu+'%';$('hsanBar').style.width=G.sanity+'%';
+  const nearM=G.M.some(m=>m.on&&Math.hypot(m.x-me.x,m.z-me.z)<2.6);$('eatTip').classList.toggle('hidden',!(nearM&&me.al&&!me.wen));
+  const sb=$('sprintBtn');sb.style.opacity=G.lock?.45:1;sb.style.background=me.sp?'#06b6d4':'#0e7490';sb.textContent=G.lock?'RECHARGING…':(me.sp?'RUNNING!':'🦌 SPRINT');$('enBar').style.width=G.en+'%';$('enBar').style.background=G.lock?'#f87171':'';
+  $('dead').classList.toggle('hidden',me.al);
+  const d=Math.hypot(me.x-hp.x,me.z-hp.z),st=$('stealth');
+  if(me.stun>0){st.textContent='⚡ STUNNED by the Hunter!';st.style.color='#facc15'}
+  else if(me.wen){st.textContent='🐺 WENDIGO — hunt the Hunter until dawn!';st.style.color='#f87171'}
+  else if(me.sp){st.textContent='⚠ SPRINTING — you leave a trail!';st.style.color='#f87171'}
+  else if(G.lock){st.textContent='Sprint recharging…';st.style.color='#fbbf24'}
+  else if(d<25){st.textContent='👁 Hunter nearby — walk, blend in';st.style.color='#fbbf24'}
+  else{st.textContent='Blending in with the herd';st.style.color='#6ee7b7'}
+  if(me.hu<25&&me.al)st.textContent+=' · STARVING, find a mushroom!';
+ }
+}
+
+/* ---------- NIGHT DEFENCE ITEMS (flare = stuns Wendigos in its light, trap = 5s stun) ---------- */
+function useItem(k){const h=G.P[0];if(G.phase!=='wen'||!G.inv[k])return;G.inv[k]--;const d=k==='f'?6:0,x=h.gx-Math.sin(h.gry)*d,z=h.gz-Math.cos(h.gry)*d,id=++G.iid;addItem(id,k,x,z);bc({t:'it',id,k,x,z})}
+function addItem(id,k,x,z){const g=new THREE.Group();
+ if(k==='f'){const c=new THREE.Mesh(new THREE.SphereGeometry(.18,8,8),new THREE.MeshBasicMaterial({color:0xff5a20}));c.position.y=.2;g.add(c);
+  const r=new THREE.Mesh(new THREE.RingGeometry(7.6,8,48),new THREE.MeshBasicMaterial({color:0xff7a30,transparent:true,opacity:.5,side:THREE.DoubleSide,depthWrite:false}));r.rotation.x=-Math.PI/2;r.position.y=.05;g.add(r);
+  const li=new THREE.PointLight(0xff6a20,2,18);li.position.y=1.2;g.add(li)}
+ else{const b=new THREE.Mesh(new THREE.CylinderGeometry(.9,.9,.08,12),L(0x333333));b.position.y=.05;g.add(b);
+  for(let i=0;i<8;i++){const s=new THREE.Mesh(new THREE.ConeGeometry(.08,.3,4),L(0xbbbbbb));s.position.set(Math.cos(i*.785)*.6,.2,Math.sin(i*.785)*.6);g.add(s)}}
+ g.position.set(x,0,z);scene.add(g);G.IT.push({id,k,x,z,t:k==='f'?12:90,mesh:g})}
+function updItems(dt){for(let i=G.IT.length-1;i>=0;i--){const it=G.IT[i];it.t-=dt;if(it.t<=0){scene.remove(it.mesh);G.IT.splice(i,1)}}}
+/* ---------- EATING + POSITIONAL CHOMP SOUND ---------- */
+function eat(gi){const p=G.P[gi];if(!p||!p.al||p.wen)return;let b=null,bd=2.6;
+ G.M.forEach(m=>{const d=Math.hypot(m.x-p.gx,m.z-p.gz);if(m.on&&d<bd){b=m;bd=d}});
+ if(!b)return;b.on=false;b.t=18;p.hu=Math.min(100,p.hu+35);chomp(b.x,b.z);bc({t:'ch',x:b.x,z:b.z})}
+function chomp(x,z){try{AC=AC||new AudioContext();const pn=AC.createPanner();pn.panningModel='HRTF';pn.distanceModel='inverse';pn.refDistance=4;pn.maxDistance=100;pn.rolloffFactor=1.2;
+ if(pn.positionX){pn.positionX.value=x;pn.positionY.value=.5;pn.positionZ.value=z}else pn.setPosition(x,.5,z);pn.connect(AC.destination);
+ const t0=AC.currentTime,len=.09;
+ for(let k=0;k<4;k++){const t=t0+k*.17,buf=AC.createBuffer(1,Math.floor(AC.sampleRate*len),AC.sampleRate),dt=buf.getChannelData(0);
+  for(let i=0;i<dt.length;i++)dt[i]=(Math.random()*2-1)*(1-i/dt.length);
+  const s=AC.createBufferSource(),f=AC.createBiquadFilter(),g=AC.createGain(),o=AC.createOscillator(),og=AC.createGain();
+  s.buffer=buf;f.type='bandpass';f.frequency.value=900+Math.random()*700;f.Q.value=1.2;g.gain.setValueAtTime(1.8,t);g.gain.exponentialRampToValueAtTime(.001,t+len);
+  s.connect(f);f.connect(g);g.connect(pn);s.start(t);
+  o.type='square';o.frequency.setValueAtTime(160,t);o.frequency.exponentialRampToValueAtTime(60,t+.07);og.gain.setValueAtTime(.3,t);og.gain.exponentialRampToValueAtTime(.001,t+.08);o.connect(og);og.connect(pn);o.start(t);o.stop(t+.09)}
+ }catch(e){}}
+function lis(){if(!AC)return;const l=AC.listener,p=camera.position,f=camera.getWorldDirection(new THREE.Vector3());
+ if(l.positionX){l.positionX.value=p.x;l.positionY.value=p.y;l.positionZ.value=p.z;l.forwardX.value=f.x;l.forwardY.value=0;l.forwardZ.value=f.z;l.upX.value=0;l.upY.value=1;l.upZ.value=0}
+ else{l.setPosition(p.x,p.y,p.z);l.setOrientation(f.x,0,f.z,0,1,0)}}
+/* ---------- GRAPHICS SETTINGS ---------- */
+const GF={low:{s:0,r:1,g:0,f:0},med:{s:1024,r:1.5,g:1500,f:1},high:{s:2048,r:2,g:4000,f:1}};
+function applyGfx(k){const c=GF[k];G.gfx=k;renderer.setPixelRatio(Math.min(devicePixelRatio,c.r));renderer.setSize(innerWidth,innerHeight);
+ sun.castShadow=!!c.s;if(c.s){if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null}sun.shadow.mapSize.set(c.s,c.s)}
+ GM.count=c.g;GM.visible=c.g>0;FFP.visible=!!c.f;scene.fog.far=c.s?120:80;$('gfx').value=k;try{localStorage.setItem('hhgfx',k)}catch(e){}}
+function cycleGfx(){const o=['low','med','high'];applyGfx(o[(o.indexOf(G.gfx)+1)%3]);toast('Graphics: '+G.gfx.toUpperCase())}
+$('gfx').onchange=e=>applyGfx(e.target.value);
+applyGfx((()=>{let v;try{v=localStorage.getItem('hhgfx')}catch(e){}return GF[v]?v:'high'})());
+/* ---------- GAMERTAGS (Deer see all tags; the Hunter sees none) ---------- */
+const tagEls=[];
+function mkTags(){G.P.forEach((p,i)=>{if(!p)return;const d=document.createElement('div');d.className='absolute text-xs font-bold px-1 rounded bg-black/50 whitespace-nowrap';d.style.color=i?'#6ee7b7':'#f87171';d.textContent=(i?'':'🔫 ')+(G.names[i]||'Player');$('hud').appendChild(d);tagEls[i]=d})}
+function updTags(){tagEls.forEach((d,i)=>{const p=G.P[i];if(!d||!p)return;
+ if(G.me===0||i===G.me||!p.al){d.style.display='none';return}
+ const v=new THREE.Vector3(p.x,p.wen?4.4:(p.sp?3.4:2.8),p.z).project(camera);
+ if(v.z>1){d.style.display='none';return}
+ d.style.display='block';d.style.left=(v.x*.5+.5)*innerWidth+'px';d.style.top=(-v.y*.5+.5)*innerHeight+'px';d.style.transform='translate(-50%,-100%)'})}
+/* ---------- MAIN LOOP ---------- */
+let last=performance.now();
+function loop(t){
+ requestAnimationFrame(loop);const dt=Math.min(.05,(t-last)/1000);last=t;
+ if(G.phase==='play'||G.phase==='wen'){
+  ctrl(dt);G.cd-=dt;
+  if(G.host)hostTick(dt);
+  G.P.forEach((p,i)=>p&&rend(p,dt,i===G.me));
+  G.N.forEach(n=>rend(n,dt,false));updItems(dt);
+  if(G.me===0)G.P[0].mesh.visible=false;
+  G.M.forEach(m=>{m.mesh.visible=m.on;m.mesh.position.y=Math.sin(t/400+m.x)*.08});
+  if(!G.host&&G.conn&&G.conn.open&&(G.sendT-=dt)<=0){G.sendT=.05;const me=G.P[G.me];
+   if(me&&me.al)G.conn.send({t:'in',x:me.x,z:me.z,ry:me.ry,sp:me.sp?1:0})}
+  cam();hud(dt);updTags();
+ }
+ updParts(dt);{for(let i=0;i<FF;i++){ffp[i*3+1]=2+Math.sin(t/900+i)*1.2;ffp[i*3]+=Math.sin(t/1300+i*3)*.004}ffg.attributes.position.needsUpdate=true}
+ lis();sky.position.copy(camera.position);sun.position.set(camera.position.x+35,55,camera.position.z+20);sun.target.position.set(camera.position.x,0,camera.position.z);renderer.render(scene,camera);
+}
+requestAnimationFrame(loop);
+</script>
+</body></html>
